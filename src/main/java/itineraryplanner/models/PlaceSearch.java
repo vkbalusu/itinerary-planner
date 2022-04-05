@@ -1,4 +1,4 @@
-package edu.uci.ics.itineraryplanner.models;
+package itineraryplanner.models;
 
 import java.util.List;
 

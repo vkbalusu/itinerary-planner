@@ -1,4 +1,4 @@
-package edu.uci.ics.itineraryplanner.configs;
+package itineraryplanner.configs;
 
 import java.nio.charset.Charset;
 
