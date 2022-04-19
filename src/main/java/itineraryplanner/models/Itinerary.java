@@ -1,10 +1,15 @@
 package itineraryplanner.models;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public class Itinerary {
 	
 	List<Route> days;
+	
+	public Itinerary() {
+		this.days = new ArrayList<>();
+	}
 	
 	public Itinerary(List<Route> routes) {
 		super();

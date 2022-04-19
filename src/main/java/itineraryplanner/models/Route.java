@@ -1,15 +1,16 @@
 package itineraryplanner.models;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Date;
 
 public class Route  implements Comparable<Route>{
 	
+	private LocalDate date;
 	private ArrayList<TouristSpot> places;
 	private double ratingScore;
 	private double distanceScore;
 	private double profitScore;
-	private Date date;
 
 	public Route(ArrayList<TouristSpot> places, double ratingScore, double distanceScore, double profitScore) {
 		super();
@@ -62,11 +63,11 @@ public class Route  implements Comparable<Route>{
 		this.profitScore = profitScore;
 	}
 	
-	public Date getDate() {
+	public LocalDate getDate() {
 		return date;
 	}
 
-	public void setDate(Date date) {
+	public void setDate(LocalDate date) {
 		this.date = date;
 	}
 

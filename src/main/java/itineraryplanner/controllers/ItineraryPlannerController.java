@@ -1,13 +1,17 @@
 package itineraryplanner.controllers;
 
+import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -28,6 +32,7 @@ import itineraryplanner.models.Period;
 
 import itineraryplanner.models.PlaceDetail;
 import itineraryplanner.exceptions.DistanceMatrixException;
+import itineraryplanner.exceptions.ItineraryPlannerException;
 import itineraryplanner.exceptions.PlaceDetailException;
 import itineraryplanner.exceptions.PlaceSearchException;
 import itineraryplanner.models.Place;
@@ -48,8 +53,17 @@ public class ItineraryPlannerController {
 	
 	
 	@GetMapping("/api/plan")
-	public ItineraryPlan getItineraryPlan(@RequestParam String placeName) {
-		
+	public ItineraryPlan getItineraryPlan(
+			
+			@RequestParam String placeName, 
+			
+			@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+			
+			@RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate
+			
+			) 
+	{
+		int numberOfDays = (int) ChronoUnit.DAYS.between(startDate,endDate) + 1;
 		String pageToken = null;
 		List<Place> places = new LinkedList<>();
 		PlaceSearch placeSearch;
@@ -70,12 +84,11 @@ public class ItineraryPlannerController {
 						places.add(spot);
 				}
 				pageToken = placeSearch.getNextPageToken();
-				TimeUnit.SECONDS.sleep(5);
+				TimeUnit.SECONDS.sleep(2);
 			}while(pageToken != null);
 			
 			Collections.sort(places, Collections.reverseOrder());
-			places = places.subList(0, Math.min(10, places.size()));
-			
+			places = places.subList(0, Math.min(Math.min(40, 10 * numberOfDays), places.size()));
 			
 			Iterator<Place> placesIterator = places.iterator();
 			List<List<Interval>> timings;
@@ -106,44 +119,46 @@ public class ItineraryPlannerController {
 					placesIterator.remove();
 				}
 			}
-			
-			String distanceParam = new String();
-			for (int i = 0; i < places.size(); i++) {
-				if (i == places.size()-1) {
-					distanceParam =  distanceParam + "place_id:" + places.get(i).getPlace_id();
-					break;
-				} else {
-					distanceParam =  distanceParam + "place_id:" + places.get(i).getPlace_id() + "|";
-				}
-			}
-			
-			DistanceMatrix distanceMatrix;
-			distanceMatrix = restTemplate.getForObject(Constants.DISTANCE_MATRIX_API, DistanceMatrix.class, distanceParam, distanceParam, Constants.API_KEY);
-			if(distanceMatrix != null && ! distanceMatrix.getStatus().equals(Constants.OK))
-				throw new DistanceMatrixException(distanceMatrix.getStatus());
-			
-			List<List<DistanceDurationPair>> matrix =  new ArrayList<>();
-			
-			for(Row row : distanceMatrix.getRows()) {
-				List<DistanceDurationPair> metrics = new ArrayList<>();
-				for(Element element : row.getElements()) {
-					DistanceDurationPair pair = new DistanceDurationPair(element.getDistance().getValue(), element.getDuration().getValue());
-					metrics.add(pair);
-				}
-				matrix.add(metrics);
-			}
-			
-//			for(int i = 0; i < matrix.size(); i++) {
-//				for(int j = 0; j < matrix.get(i).size(); j++) {
-//					System.out.println(matrix.get(i).get(j).getDistance() + "    " + matrix.get(i).get(j).getDuration());
-//				}
-//			}
+	
+			int numbersOfRows, numberofColumns; DistanceMatrix distanceMatrix;
+			DistanceDurationPair[][] matrix = new DistanceDurationPair[places.size()][places.size()];
+			for(int i = 0; i < places.size(); i = i + 10){
+				String origins = new String(); numbersOfRows = Math.min(places.size(), i + 10);
+		        for(int t = i; t < numbersOfRows; t++){
+		        	if(t == numbersOfRows - 1)
+		        		origins = origins + "place_id:" + places.get(t).getPlace_id();
+		        	else
+		        		origins = origins + "place_id:" + places.get(t).getPlace_id() + "|";
+		        }
+		        for(int j = 0; j < places.size(); j = j + 10){
+		        	String destinations = new String(); numberofColumns = Math.min(places.size(), j + 10);
+		            for(int t = j; t < numberofColumns; t++){
+		            	if(t == numberofColumns - 1)
+		            		destinations = destinations + "place_id:" + places.get(t).getPlace_id();
+		            	else 
+		            		destinations = destinations + "place_id:" + places.get(t).getPlace_id() + "|";;
+		            }
+		            distanceMatrix = restTemplate.getForObject(Constants.DISTANCE_MATRIX_API, DistanceMatrix.class, origins, destinations, Constants.API_KEY);
+		            if(distanceMatrix != null && ! distanceMatrix.getStatus().equals(Constants.OK))
+						throw new DistanceMatrixException(distanceMatrix.getStatus());
+		            int rnum = i;
+		            for(Row row : distanceMatrix.getRows()) {
+					    int cnum = j;
+						for(Element element : row.getElements()) {
+							DistanceDurationPair pair = new DistanceDurationPair(element.getDistance().getValue(), element.getDuration().getValue());
+							matrix[rnum][cnum] = pair;
+							cnum++;
+						}
+						rnum++;
+					}
+		        }
+		    }
+		
 			ArrayList<ArrayList<Integer>> routePermuations = new ArrayList<>();
 		    routePermute(routePermuations, new ArrayList<>(), places.size(), 4);
-		    day = 0;
-		    List<Interval> placeTimings;
-		    System.out.println(routePermuations.size());
 		    
+		    day = 4; //preparing itinerary for Thursday. Should ideally consider day of the week for the selected dates
+		    List<Interval> placeTimings;
 		    int start, open, close, i, j, oneDay = 24 * 60;
 			double ratingScore = 0, distanceScore = 0, maxRatingScore = -1, maxDistanceScore = -1;
 			List<Route> routes = new ArrayList<>();
@@ -163,12 +178,10 @@ public class ItineraryPlannerController {
 				ratingScore += (place.getRating() * place.getUser_ratings_total());
 				
 				for(i = 1; i < route.size(); i++) {
-					start  = (start + (int) (matrix.get(route.get(i - 1)).get(route.get(i)).getDuration() / 60)) % oneDay; // travel to next place
+					start  = (start + (int) (matrix[route.get(i - 1)][route.get(i)].getDuration() / 60)) % oneDay; // travel to next place
 					place = places.get(route.get(i));
 					ratingScore += (place.getRating() * place.getUser_ratings_total());
-					
-					distanceScore += matrix.get(route.get(i - 1)).get(route.get(i)).getDistance();
-					
+					distanceScore += matrix[route.get(i - 1)][route.get(i)].getDistance();
 					placeTimings = place.getTimings().get(day);
 					if(placeTimings == null) {
 						break; // invalid if place has no open timings on given day of the week
@@ -180,8 +193,7 @@ public class ItineraryPlannerController {
 						if(start >= open && (start + 120) % oneDay <= close) {
 							travelTimes.add(new VisitingTime(getHours(start), getHours((start + 120) % oneDay)));
 							break;
-						}
-							
+						}	
 					}
 					if(j == placeTimings.size()) {
 						break; // invalid if place is not open at required time
@@ -201,19 +213,42 @@ public class ItineraryPlannerController {
 					routes.add(new Route(p, ratingScore, distanceScore));
 				}
 			}
-			System.out.println(routes.size());
+			
 			double profitScore;
 			for(Route route : routes) {
 				profitScore = 2 * (route.getRatingScore()/ maxRatingScore) - (route.getDistanceScore() / maxDistanceScore);
 				route.setProfitScore(profitScore);
 			}
+			if(routes.size() < numberOfDays) {
+				throw new ItineraryPlannerException(Constants.FEWER_ROUTES);
+			}
 			Collections.sort(routes);
-						
-			Itinerary itinerary = new Itinerary(routes.subList(0, Math.min(routes.size(), 3)));
-			itineraryPlan.setNumberofDays(itinerary.getDays().size());
+			Itinerary itinerary = new Itinerary();
+			HashMap<String, Integer> visited = new HashMap<>();
+			for(Route route : routes) {
+				boolean skipRoute = false;
+				for(i = 0; i < 4; i++) {
+					if(visited.containsKey(route.getPlaces().get(i).getName())) {
+						skipRoute = true;
+						break;
+					}
+				}
+				//select routes with previously unvisited places.
+				if(skipRoute == true) continue;
+				for(i = 0; i < 4; i++) {
+					visited.put(route.getPlaces().get(i).getName(), 1);
+				}
+				route.setDate(startDate);
+				startDate = startDate.plusDays(1);
+				itinerary.getDays().add(route);
+				if(itinerary.getDays().size() == numberOfDays)
+					break;
+			}
+			if(itinerary.getDays().size() < numberOfDays)
+				throw new ItineraryPlannerException(Constants.FEWER_ROUTES);
+			itineraryPlan.setNumberofDays(numberOfDays);
 			itineraryPlan.setItinerary(itinerary);
 			itineraryPlan.setStatus(Constants.OK);
-			
 		}catch(Exception exception){
 			itineraryPlan.setStatus(Constants.ERROR);
 			itineraryPlan.setErrorMessage(exception.getMessage());
@@ -221,11 +256,9 @@ public class ItineraryPlannerController {
 		return itineraryPlan;
 	}
 	
-	private void routePermute(ArrayList<ArrayList<Integer>> list, ArrayList<Integer> tempList, int placesCount,
-			int permutationSize) {
+	private void routePermute(ArrayList<ArrayList<Integer>> list, ArrayList<Integer> tempList, int placesCount, int permutationSize) {
 		if (tempList.size() == permutationSize) {
 			list.add(new ArrayList<>(tempList));
-			// System.out.println(list.get(list.size() - 1));
 		} else {
 			for (int i = 0; i < placesCount; ++i) {
 				if (tempList.contains(i))
